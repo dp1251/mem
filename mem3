@@ -1,0 +1,90 @@
+import subprocess
+import psutil
+from tabulate import tabulate  # You might need this for better table formatting
+
+def check_hugepages():
+    """ Check current hugepage settings on Linux systems. """
+    try:
+        with open('/proc/meminfo', 'r') as f:
+            meminfo = f.readlines()
+        
+        hugepages = {}
+        for line in meminfo:
+            if line.startswith('Huge'):
+                parts = line.split()
+                hugepages[parts[0]] = {
+                    'total': int(parts[1]),
+                    'free': int(parts[2]),
+                    'usage': int(parts[3])
+                }
+        
+        # Convert to a tabular format for easier reading
+        table_data = [['Type', 'Total (kB)', 'Free (kB)', 'Usage (kB)']]
+        for k, v in hugepages.items():
+            if v['total'] != 0:  # Exclude rows with total usage as 0
+                table_data.append([k, f"{v['total']} kB", f"{v['free']} kB", f"{v['usage']} kB"])
+        
+        print(tabulate(table_data, headers='firstrow', tablefmt='fancy_grid'))
+    
+    except Exception as e:
+        print("Failed to read hugepage information:", str(e))
+
+def get_system_memory():
+    """ Get system-wide memory information in gigabytes (GB). """
+    mem = psutil.virtual_memory()
+    total_memory_gb = mem.total / (1024 ** 3)
+    available_memory_gb = mem.available / (1024 ** 3)
+    used_memory_gb = (mem.total - mem.available) / (1024 ** 3)
+    memory_utilization = (used_memory_gb / total_memory_gb) * 100 if total_memory_gb != 0 else 0
+    return total_memory_gb, available_memory_gb, used_memory_gb, memory_utilization
+
+def get_process_memory():
+    """ Get detailed process-specific memory information excluding zero values. """
+    processes = []
+    for proc in psutil.process_iter(['pid', 'name']):
+        try:
+            vsz = proc.memory_info().vms  # Virtual Memory Size
+            rss = proc.memory_info().rss  # Resident Set Size
+            if vsz != 0 and rss != 0:  # Exclude rows with VSZ or RSS as 0
+                processes.append({
+                    'pid': proc.pid,
+                    'name': proc.name(),
+                    'VSZ': vsz / 1024 ** 2,  # Convert to GB
+                    'RSS': rss / 1024 ** 2   # Convert to GB
+                })
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            pass
+    return processes
+
+def main():
+    # Check current status of huge pages
+    print("Current Hugepage Status:")
+    check_hugepages()
+    
+    # Get system-wide memory information
+    total_memory, available_memory, used_memory, memory_utilization = get_system_memory()
+    print(f"\nSystem Total Memory: {total_memory:.2f} GB")
+    print(f"Available Memory: {available_memory:.2f} GB")
+    print(f"Used Memory: {used_memory:.2f} GB")
+    print(f"Memory Utilization: {memory_utilization:.2f}%")
+    
+    # Get process-specific memory information
+    processes = get_process_memory()
+    if processes:
+        table_data = [['PID', 'Name', 'VSZ (GB)', 'RSS (GB)']]
+        for proc in processes:
+            table_data.append([proc['pid'], proc['name'], f"{proc['VSZ']:.2f} GB", f"{proc['RSS']:.2f} GB"])
+        
+        print("\nProcess-Specific Memory Information:")
+        print(tabulate(table_data, headers='firstrow', tablefmt='fancy_grid'))
+        
+        # Calculate and present the sum of VSZ and RSS for all processes
+        total_vsz = sum([proc['VSZ'] for proc in processes])
+        total_rss = sum([proc['RSS'] for proc in processes])
+        print(f"\nTotal Sum of VSZ for All Processes: {total_vsz:.2f} GB")
+        print(f"Total Sum of RSS for All Processes: {total_rss:.2f} GB")
+    else:
+        print("No running processes found.")
+
+if __name__ == "__main__":
+    main()
