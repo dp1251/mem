@@ -1,0 +1,96 @@
+#!/usr/bin/python3
+import subprocess
+import psutil
+from tabulate import tabulate  # You might need this for better table formatting
+
+def check_hugepages():
+    """ Check current hugepage settings on Linux systems. """
+    try:
+        with open('/proc/meminfo', 'r') as f:
+            meminfo = f.readlines()
+        
+        hugepages = {}
+        for line in meminfo:
+            if line.startswith('Huge'):
+                parts = line.split()
+                hugepages[parts[0]] = {
+                    'total': int(parts[1]),
+                    'free': int(parts[2]),
+                    'usage': int(parts[3])
+                }
+        
+        # Convert to a tabular format for easier reading
+        table_data = [['Type', 'Total (kB)', 'Free (kB)', 'Usage (kB)']]
+        for k, v in hugepages.items():
+            table_data.append([k, f"{v['total']} kB", f"{v['free']} kB", f"{v['usage']} kB"])
+        
+        print(tabulate(table_data, headers='firstrow', tablefmt='fancy_grid'))
+    
+    except Exception as e:
+        print("Failed to read hugepage information:", str(e))
+
+def configure_hugepages():
+    """ Configure hugepages on Linux systems. This part assumes you have sudo privileges. """
+    try:
+        subprocess.run(['sudo', 'echo', '2048' if not check_hugepages() else '1'], check=True)
+        print("Hugepage configuration changed.")
+    except subprocess.CalledProcessError as e:
+        print("Failed to configure hugepages:", str(e))
+
+def get_system_memory():
+    """ Get system-wide memory information. """
+    total_memory = psutil.virtual_memory().total / (1024 ** 2)  # in MB
+    available_memory = psutil.virtual_memory().available / (1024 ** 2)  # in MB
+    used_memory = (psutil.virtual_memory().total - psutil.virtual_memory().available) / (1024 ** 2)  # in MB
+    memory_utilization = (used_memory / total_memory) * 100
+    return total_memory, available_memory, used_memory, memory_utilization
+
+def get_process_memory():
+    """ Get detailed process-specific memory information. """
+    processes = []
+    for proc in psutil.process_iter(['pid', 'name']):
+        try:
+            vsz = proc.memory_info().vms  # Virtual Memory Size
+            rss = proc.memory_info().rss  # Resident Set Size
+            processes.append({
+                'pid': proc.pid,
+                'name': proc.name(),
+                'VSZ': vsz,
+                'RSS': rss
+            })
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            pass
+    return processes
+
+def main():
+    # Check current status of huge pages
+    print("Current Hugepage Status:")
+    check_hugepages()
+    
+    # Optionally, configure huge pages if needed
+    user_input = input("Do you want to configure hugepages? (y/n): ")
+    if user_input.lower() == 'y':
+        print("Configuring Hugepages...")
+        configure_hugepages()
+    
+    # Get system-wide memory information
+    total_memory, available_memory, used_memory, memory_utilization = get_system_memory()
+    print(f"\nSystem Total Memory: {total_memory:.2f} MB")
+    print(f"Available Memory: {available_memory:.2f} MB")
+    print(f"Used Memory: {used_memory:.2f} MB")
+    print(f"Memory Utilization: {memory_utilization:.2f}%")
+    
+    # Get process-specific memory information
+    processes = get_process_memory()
+    if processes:
+        table_data = [['PID', 'Name', 'VSZ (kB)', 'RSS (kB)']]
+        for proc in processes:
+            table_data.append([proc['pid'], proc['name'], f"{proc['VSZ'] / 1024:.2f} MB", f"{proc['RSS'] / 1024:.2f} MB"])
+        
+        print("\nProcess-Specific Memory Information:")
+        print(tabulate(table_data, headers='firstrow', tablefmt='fancy_grid'))
+    else:
+        print("No running processes found.")
+
+if __name__ == "__main__":
+    main()
